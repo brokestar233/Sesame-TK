@@ -1845,7 +1845,6 @@ class AntFarm : ModelTask() {
                 val gameAward = joInit.optJSONObject("gameAward")
                 if (gameAward?.optBoolean("level3Get") == true) {
                     Log.record(TAG, "庄园游戏🎮[${gameType.gameName()}]#今日奖励已领满")
-                    break
                 }
 
                 val remainingCount = joInit.optInt("remainingGameCount", 1)
