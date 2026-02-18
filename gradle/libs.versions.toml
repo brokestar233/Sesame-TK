@@ -2,7 +2,7 @@
 activity-compose = "1.12.1"
 
 android = "4.1.1.4"
-android-plugin = "8.9.3"
+android-plugin = "8.12.3"
 cmdAndroid = "0.8.2"
 constraintlayout = "2.2.1"
 
@@ -41,6 +41,10 @@ espressoCore = "3.7.0"
 fragment = "1.8.9"
 uiTextGoogleFonts = "1.10.0"
 material3 = "1.4.0"
+
+tensorflowLite = "2.17.0"
+tensorflowLiteSupport = "0.5.0"
+
 [libraries]
 
 android = { module = "com.google.android:android", version.ref = "android" }
@@ -92,7 +96,13 @@ androidx-fragment = { group = "androidx.fragment", name = "fragment", version.re
 androidx-ui-text-google-fonts = { group = "androidx.compose.ui", name = "ui-text-google-fonts", version.ref = "uiTextGoogleFonts" }
 material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 
-
+tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
+# 支持库
+tensorflow-lite-support = { group = "org.tensorflow", name = "tensorflow-lite-support", version.ref = "tensorflowLiteSupport" }
+# GPU 加速
+tensorflow-lite-gpu = { group = "org.tensorflow", name = "tensorflow-lite-gpu", version.ref = "tensorflowLite" }
+# 元数据处理
+tensorflow-lite-metadata = { group = "org.tensorflow", name = "tensorflow-lite-metadata", version.ref = "tensorflowLiteSupport" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "android-plugin" }
@@ -100,4 +110,7 @@ android-library = { id = "com.android.library", version.ref = "android-plugin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 rikka-tools-refine = { id = "dev.rikka.tools.refine", version.ref = "hiddenapi" }
+
+[bundles]
+tensorflow = ["tensorflow-lite", "tensorflow-lite-support", "tensorflow-lite-gpu", "tensorflow-lite-metadata"]
 

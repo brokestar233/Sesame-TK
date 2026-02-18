@@ -502,7 +502,7 @@ class ApplicationHook {
                 return false
             }
 
-            val maxSupported = AlipayVersion("10.6.58.99999")
+            val maxSupported = AlipayVersion("10.9.99.99999")
             if (alipayVersion > maxSupported) {
                 // 只有在不支持时才打印警告
                 record(TAG, "目标应用版本 $alipayVersion 高于 10.6.58，不支持自动过滑块验证")

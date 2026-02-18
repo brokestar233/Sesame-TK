@@ -2,16 +2,27 @@ package fansirsqi.xposed.sesame.hook
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.util.Base64
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ImageView
 import fansirsqi.xposed.sesame.hook.simple.MotionEventSimulator
 import fansirsqi.xposed.sesame.hook.simple.SimplePageManager
 import fansirsqi.xposed.sesame.hook.simple.SimpleViewImage
 import fansirsqi.xposed.sesame.hook.simple.ViewHierarchyAnalyzer
+import fansirsqi.xposed.sesame.hook.simple.SliderTFLite
 import fansirsqi.xposed.sesame.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
+import java.io.ByteArrayOutputStream
 import kotlin.random.Random
 
-/**
+import fansirsqi.xposed.sesame.hook.VersionHook
+import fansirsqi.xposed.sesame.entity.AlipayVersion
+
+/*
  * 滑动坐标四元组，用于封装滑动起点和终点坐标。
  */
 data class SlideCoordinates(
@@ -23,7 +34,6 @@ data class SlideCoordinates(
 
 /**
  * 验证码处理程序的基类，提供处理滑动验证码的通用逻辑。
- * 该类专门用于处理目标应用验证页面上的滑动验证码。
  */
 abstract class BaseCaptchaHandler {
 
@@ -31,36 +41,44 @@ abstract class BaseCaptchaHandler {
         private const val TAG = "CaptchaHandler"
 
         // 滑动参数配置
-        private const val SLIDE_START_OFFSET = 25 // 滑动起始位置偏移量（像素）
-        private const val SLIDE_END_MARGIN = 20   // 滑动结束位置距离右侧的边距（像素）
-        private const val SLIDE_DURATION_MIN = 500L // 最小滑动持续时间
-        private const val SLIDE_DURATION_MAX = 600L // 最大滑动持续时间
-
-        // 滑动后延迟检查是否成功
+        private const val SLIDE_START_OFFSET = 25
+        private const val SLIDE_END_MARGIN = 20
+        private const val SLIDE_DURATION_MIN = 500L
+        private const val SLIDE_DURATION_MAX = 800L //稍微增加最大时间
         private const val POST_SLIDE_CHECK_DELAY_MS = 2000L
 
-        // 查找滑动验证文本的 XPath
-        private const val SLIDE_VERIFY_TEXT_XPATH = "//TextView[contains(@text,'向右滑动验证')]"
-
-        // 并发控制，防止多个处理程序同时运行
+        // 旧版本 XPath
+        private const val OLD_SLIDE_VERIFY_TEXT_XPATH = "//TextView[contains(@text,'向右滑动验证')]"
+        
+        // 新版本 XPath (根据提供的截图)
+        private const val NEW_SLIDE_VERIFY_TEXT_XPATH = "//TextView[contains(@text,'请拖动滑块完成拼图')]"
+        
         private val captchaProcessingMutex = Mutex()
     }
 
-    /**
-     * 获取在 DataStore 中存储滑动路径的键。
-     * @return 用于存储滑动路径的键。
-     */
     protected abstract fun getSlidePathKey(): String
 
-    /**
-     * 处理当前 Activity 中的验证码。
-     * @param activity 当前 Activity 实例。
-     * @param root 根视图图像。
-     * @return 如果验证码处理成功返回 true，否则返回 false。
-     */
+    private var sliderDetector: SliderTFLite? = null
+
     open suspend fun handleActivity(activity: Activity, root: SimpleViewImage): Boolean {
         return try {
-            handleSlideCaptcha(activity)
+
+            // 版本判断逻辑
+            val isNewVersion = if (VersionHook.hasVersion()) {
+                val currentVersion = VersionHook.getCapturedVersion() ?: AlipayVersion("")
+                val thresholdVersion = AlipayVersion("10.6.58.9999") 
+                currentVersion.compareTo(thresholdVersion) > 0
+            } else {
+                false
+            }
+
+            if (isNewVersion) {
+                Log.record(TAG, "检测到新版本应用，使用图像识别模式处理验证码。")
+                handleNewVersionCaptcha(activity)
+            } else {
+                Log.record(TAG, "检测到旧版本应用，使用传统模式处理验证码。")
+                handleLegacySlideCaptcha(activity)
+            }
         } catch (e: Exception) {
             Log.error(TAG, "处理验证码页面时发生异常: ${e.stackTraceToString()}")
             false
@@ -68,76 +86,153 @@ abstract class BaseCaptchaHandler {
     }
 
     @SuppressLint("SuspiciousIndentation")
-    private suspend fun handleSlideCaptcha(activity: Activity): Boolean {
+    private suspend fun handleNewVersionCaptcha(activity: Activity): Boolean {
+        if (!captchaProcessingMutex.tryLock()) return true
+        try {
+            if (sliderDetector == null) {
+                sliderDetector = SliderTFLite(activity.applicationContext)
+            }
+
+            // 1. 查找新版提示文本
+            val verifyText = SimplePageManager.tryGetTopView(NEW_SLIDE_VERIFY_TEXT_XPATH) ?: run {
+                // 如果没找到新版文本，尝试找旧版文本作为回退
+                if (SimplePageManager.tryGetTopView(OLD_SLIDE_VERIFY_TEXT_XPATH) != null) {
+                    Log.record(TAG, "未找到新版文本但发现了旧版文本，回退到旧逻辑。")
+                    captchaProcessingMutex.unlock() // 解锁以便调用旧逻辑
+                    return handleLegacySlideCaptcha(activity)
+                }
+                Log.record(TAG, "未找文本文本!!!")
+                return false
+            }
+
+            Log.record(TAG, "发现新版滑动验证文本: ${verifyText.getText()}")
+            delay(800L) // 等待图片加载完全
+
+            // 2. 查找关键视图：滑块(Slider) 和 背景图(Background)
+            // 这里需要根据实际布局层级调整。通常背景图是滑块的兄弟节点或父容器的子节点
+            val sliderView = ViewHierarchyAnalyzer.findActualSliderView(verifyText) ?: return false
+            val backgroundView = findCaptchaImageView(sliderView) ?: run {
+                Log.record(TAG, "无法找到验证码背景图片视图")
+                return false
+            }
+
+            // 3. 截图并识别
+            val (gapX, conf) = recognizeCaptchaGapNative(backgroundView) ?: run {
+                Log.record(TAG, "图像识别失败")
+                return false
+            }
+            
+            // 4. 计算坐标并滑动
+            // gapX 是图片内部的缺口左边缘 X 坐标
+            val slideDistance = calculateDistance(gapX, backgroundView.width, backgroundView, sliderView)
+            
+            return performSlide(activity, sliderView, slideDistance)
+
+        } catch (e: Exception) {
+            Log.record(TAG, "新版验证码处理出错: ${e.stackTraceToString()}")
+            return false
+        } finally {
+            if (captchaProcessingMutex.isLocked) captchaProcessingMutex.unlock()
+        }
+    }
+
+    /*
+     * 在 sliderView 附近查找大的 ImageView (验证码背景)
+     * 策略：向上找父容器，然后在父容器中找尺寸最大的 ImageView
+     */
+    private fun findCaptchaImageView(sliderView: View): ImageView? {
+        val parent = sliderView.parent as? ViewGroup ?: return null
+        // 简单策略：遍历父容器子View，找面积最大的 ImageView
+        var maxArea = 0
+        var targetImage: ImageView? = null
+        
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            if (child is ImageView && child.visibility == View.VISIBLE) {
+                val area = child.width * child.height
+                // 通常验证码图片高度会比较大，且不是小图标
+                if (area > maxArea && child.width > 200) { 
+                    maxArea = area
+                    targetImage = child
+                }
+            }
+        }
+        return targetImage
+    }
+
+    private fun recognizeCaptchaGapNative(imageView: ImageView): Pair<Int, Float>? {
+        return try {
+            val bitmap = getBitmapFromView(imageView) ?: return null
+
+            // 调用 Kotlin 实现的 TFLite 识别
+            val (x1, conf) = sliderDetector!!.identifyOffset(bitmap)
+
+            Log.record(TAG, "TFLite 识别成功: x1=$x1, conf=$conf")
+
+            // 注意：identifyOffset 返回的 x1 是相对于传入 bitmap 的坐标
+            // 如果 bitmap 是直接从 View 截取的，那么这个 x1 就是 View 坐标系下的
+            return Pair(x1, conf)
+        } catch (e: Exception) {
+            Log.record(TAG, "TFLite 调用失败: ${e.message}")
+            null
+        }
+    }
+
+
+    private fun getBitmapFromView(view: View): Bitmap? {
+        if (view.width <= 0 || view.height <= 0) return null
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        view.draw(canvas)
+        return bitmap
+    }
+
+    private fun calculateDistance(gapXInImage: Int, imageRealWidth: Int, bgView: View, sliderView: View): Float {
+        // 因为我们传入的是 View 的截图 (getBitmapFromView)，所以 gapXInImage 已经是屏幕坐标系下的像素值
+        // imageRealWidth 传入的是 bgView.width
+        // 所以 scale 应该是 1.0
+        val scale = bgView.width.toFloat() / imageRealWidth.toFloat()
+
+        // 这里的计算可以简化，直接认为 gapXInImage 就是目标位置
+        val distance = gapXInImage.toFloat()
+
+        Log.record(TAG, "计算距离: GapX=$gapXInImage, Distance=$distance")
+        return distance
+    }
+
+    @SuppressLint("SuspiciousIndentation")
+    private suspend fun handleLegacySlideCaptcha(activity: Activity): Boolean {
         if (!captchaProcessingMutex.tryLock()) {
-            return true // 返回 true 告知上层已处理，避免重试
+            return true
         }
         try {
-            val slideTextInDialog = findSlideTextInDialog() ?: run {
-               // Log.captcha(TAG, "未找到滑动验证文本，跳过处理")
-                return false // 未找到关键视图，返回 false 让其他处理器尝试
+            val slideTextInDialog = SimplePageManager.tryGetTopView(OLD_SLIDE_VERIFY_TEXT_XPATH) ?: run {
+                return false
             }
-            Log.record(TAG, "发现滑动验证文本: ${slideTextInDialog.getText()}")
-            delay(500L) // 等待界面稳定
-            // 执行滑动验证
-            return performSlideAndVerify(activity, slideTextInDialog)
+            Log.record(TAG, "发现旧版滑动验证文本: ${slideTextInDialog.getText()}")
+            delay(500L)
+            
+            // 使用旧版盲猜逻辑
+            val sliderView = ViewHierarchyAnalyzer.findActualSliderView(slideTextInDialog) ?: return false
+            val (startX, startY, endX, endY) = calculateLegacySlideCoordinates(activity, sliderView) ?: return false
+            
+            return executeSlide(sliderView, startX, startY, endX, endY)
         } catch (e: Exception) {
-            Log.record(TAG, "处理滑动验证码时发生错误: ${e.stackTraceToString()}")
+            Log.record(TAG, "旧版处理出错: ${e.stackTraceToString()}")
             return false
         } finally {
             captchaProcessingMutex.unlock()
         }
     }
 
-    /**
-     * 执行滑动操作并验证结果。
-     * @param activity 当前的 Activity。
-     * @param slideTextView "向右滑动验证"文本的视图图像，作为查找滑块的锚点。
-     * @return 如果验证码成功解除返回 true，否则返回 false。
-     */
-    private suspend fun performSlideAndVerify(activity: Activity, slideTextView: SimpleViewImage): Boolean {
-        val sliderView = ViewHierarchyAnalyzer.findActualSliderView(slideTextView) ?: run {
-            Log.record(TAG, "未能找到可操作的滑块视图，滑动无法执行。")
-            return false
-        }
-        
-        // 计算滑动坐标
-        val (startX, startY, endX, endY) = calculateSlideCoordinates(activity, sliderView) ?: run {
-            Log.record(TAG, "计算滑动坐标失败，滑动无法执行。")
-            return false
-        }
-
-        // 随机化滑动持续时间，模拟更自然的行为
-        val slideDuration = Random.nextLong(SLIDE_DURATION_MIN, SLIDE_DURATION_MAX + 1)
-
-        // 执行滑动
-        MotionEventSimulator.simulateSwipe(
-            view = sliderView,
-            startX = startX,
-            startY = startY,
-            endX = endX,
-            endY = endY,
-            duration = slideDuration
-        )
-
-        delay(POST_SLIDE_CHECK_DELAY_MS)
-        return if (checkCaptchaTextGone()) {
-            Log.record(TAG, "验证码文本已消失，滑动成功。")
-            true
-        } else {
-            Log.record(TAG, "验证码文本仍然存在，滑动可能失败。")
-            false
-        }
-    }
-
-    /**
+    /*
      * 计算滑动验证码的坐标参数。
      * 
      * @param activity 当前Activity，用于获取屏幕信息
      * @param sliderView 滑块视图
      * @return 包含(startX, startY, endX, endY)的四元组，如果计算失败返回null
      */
-    private fun calculateSlideCoordinates(activity: Activity, sliderView: android.view.View): SlideCoordinates? {
+    private fun calculateLegacySlideCoordinates(activity: Activity, sliderView: android.view.View): SlideCoordinates? {
         // 获取滑动区域的整体容器（滑块的父容器）
         val slideContainer = sliderView.parent as? android.view.ViewGroup ?: run {
           //  Log.captcha(TAG, "未能找到滑块容器")
@@ -195,42 +290,58 @@ abstract class BaseCaptchaHandler {
         Log.record(TAG, "滑块信息: 位置=[$sliderX,$sliderY], 尺寸=${sliderWidth}x${sliderHeight}")
         Log.record(TAG, "计算结果: 起点=[$startX,$startY], 终点=[$endX,$endY], 滑动距离=${endX-startX}px")
 
-        ApplicationHook.sendBroadcastShell(
-            getSlidePathKey(),
-            "input swipe " +
-                "${startX.toInt()} ${startY.toInt()} " +
-                "${endX.toInt()} ${endY.toInt()} " +
-                Random.nextLong(SLIDE_DURATION_MIN, SLIDE_DURATION_MAX + 1)
-        )
         return SlideCoordinates(startX, startY, endX, endY)
     }
+    
+    // 用于新版逻辑：根据计算出的距离滑动
+    private suspend fun performSlide(activity: Activity, sliderView: View, distance: Float): Boolean {
+        val location = IntArray(2)
+        sliderView.getLocationOnScreen(location)
+        val startX = location[0] + sliderView.width / 2f
+        val startY = location[1] + sliderView.height / 2f
+        
+        // 计算终点
+        val endX = startX + distance
+        val endY = startY + Random.nextInt(-2, 3) // 微小抖动
 
-    /**
-     * 检查验证码验证文本是否已从视图中消失。
-     * @return 如果文本已消失返回 true，如果仍然存在返回 false。
-     */
-    private fun checkCaptchaTextGone(): Boolean {
-        val slideTextInDialog = findSlideTextInDialog()
-        return if (slideTextInDialog == null) {
-            Log.record(TAG, "验证码文本已消失 (在对话框中未找到)。")
-            true
-        } else {
-            Log.record(TAG, "验证码文本仍然存在 (在对话框中找到)。")
-            false
-        }
+        return executeSlide(sliderView, startX, startY, endX, endY)
     }
 
-    /**
-     * 在对话框视图中查找滑动验证文本。
-     * @return 如果找到则返回文本视图的 SimpleViewImage，否则返回 null。
-     */
-    private fun findSlideTextInDialog(): SimpleViewImage? {
-        return try {
-          //  Log.captcha(TAG, "尝试通过 XPath 查找滑动验证文本: $SLIDE_VERIFY_TEXT_XPATH")
-            SimplePageManager.tryGetTopView(SLIDE_VERIFY_TEXT_XPATH)
-        } catch (e: Exception) {
-            Log.record(TAG, "由于异常导致查找验证码文本失败: ${e.stackTraceToString()}")
-            null
+    // 真正的滑动执行和结果检查
+    private suspend fun executeSlide(sliderView: View, startX: Float, startY: Float, endX: Float, endY: Float): Boolean {
+        val slideDuration = Random.nextLong(SLIDE_DURATION_MIN, SLIDE_DURATION_MAX + 1)
+        
+        Log.record(TAG, "执行滑动: ($startX, $startY) -> ($endX, $endY), 时长: $slideDuration")
+
+        ApplicationHook.sendBroadcastShell(
+            getSlidePathKey(),
+            "input swipe ${startX.toInt()} ${startY.toInt()} ${endX.toInt()} ${endY.toInt()} $slideDuration"
+        )
+        
+        MotionEventSimulator.simulateSwipe(
+            view = sliderView,
+            startX = startX,
+            startY = startY,
+            endX = endX,
+            endY = endY,
+            duration = slideDuration
+        )
+
+        delay(POST_SLIDE_CHECK_DELAY_MS)
+        return checkCaptchaTextGone()
+    }
+
+    private fun checkCaptchaTextGone(): Boolean {
+        // 检查旧版和新版文本是否都不存在了
+        val oldText = SimplePageManager.tryGetTopView(OLD_SLIDE_VERIFY_TEXT_XPATH)
+        val newText = SimplePageManager.tryGetTopView(NEW_SLIDE_VERIFY_TEXT_XPATH)
+        
+        return if (oldText == null && newText == null) {
+            Log.record(TAG, "验证码文本已消失，滑动成功。")
+            true
+        } else {
+            Log.record(TAG, "验证码文本仍然存在，滑动可能失败。")
+            false
         }
     }
 }

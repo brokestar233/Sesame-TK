@@ -1,3 +1,4 @@
+import com.android.build.api.dsl.AaptOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +74,7 @@ android {
         buildConfig = true
         compose = true
         aidl = true
+        mlModelBinding = true
     }
 
     compileOptions {
@@ -146,6 +148,7 @@ dependencies {
     implementation(libs.cmd.android)
     implementation(libs.androidx.ui.text.google.fonts)
     implementation(libs.material3) // 用于通过 Shizuku 执行命令
+    implementation(libs.bundles.tensorflow)
 
     // Compose 相关依赖 - 现代化 UI 框架
     val composeBom = platform("androidx.compose:compose-bom:2025.12.00")  // Compose BOM 版本管理

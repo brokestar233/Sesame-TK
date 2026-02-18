@@ -28,47 +28,84 @@ object MotionEventSimulator {
      * @param endY 滑动的屏幕绝对 Y 坐标终点.
      * @param duration 滑动动画的总时长 (毫秒).
      */
-    fun simulateSwipe(
+        fun simulateSwipe(
         view: View,
         startX: Float,
         startY: Float,
         endX: Float,
         endY: Float,
-        duration: Long = 800L // 模拟一个比较自然的滑动时长
+        duration: Long = 800L
     ) {
-        // 确保所有UI操作都在主线程执行
         CoroutineScope(Dispatchers.Main).launch {
-            Log.i(TAG, "准备在视图 ${view.javaClass.simpleName} 上模拟滑动")
-            Log.d(TAG, "从 ($startX, $startY) -> ($endX, $endY)，持续时间: ${duration}ms")
-            if (!view.isShown || !view.isEnabled) {
-                Log.e(TAG, "滑动失败: 目标视图不可见或未启用.")
-                return@launch
-            }
+            if (!view.isShown || !view.isEnabled) return@launch
+            
             val downTime = SystemClock.uptimeMillis()
             try {
-                // 1. 发送 ACTION_DOWN 事件，标志着手指按下
+                // 1. ACTION_DOWN
                 dispatchTouchEvent(view, MotionEvent.ACTION_DOWN, startX, startY, downTime, downTime)
-                delay(Random.nextLong(30, 80)) // 按下后短暂延迟，更像人
-                // 2. 模拟 ACTION_MOVE 事件序列，构造滑动轨迹
-                val steps = 15 // 将滑动轨迹分为 15 步
-                val stepDuration = (duration - 100) / steps
-                val xStep = (endX - startX) / steps
-                val yStep = (endY - startY) / steps
-                for (i in 1..steps) {
-                    val currentX = startX + xStep * i + Random.nextInt(-3, 4) // 增加微小随机抖动
-                    val currentY = startY + yStep * i + Random.nextInt(-2, 3)
-                    val eventTime = downTime + (stepDuration * i)
-                    dispatchTouchEvent(view, MotionEvent.ACTION_MOVE, currentX, currentY, downTime, eventTime)
-                    delay(stepDuration)
+                delay(Random.nextLong(50, 100)) // 模拟按压瞬间的反应时间
+
+                // 2. 生成拟人化轨迹点
+                val distance = endX - startX
+                val tracks = generateHumanLikeTracks(distance)
+                
+                var lastEventTime = downTime
+                tracks.forEach { (relX, relY) ->
+                    val currentX = startX + relX
+                    // 在 Y 轴加入随机微抖动
+                    val currentY = startY + relY + Random.nextInt(-2, 3)
+                    
+                    lastEventTime += Random.nextLong(10, 25) // 随机采样间隔
+                    dispatchTouchEvent(view, MotionEvent.ACTION_MOVE, currentX, currentY, downTime, lastEventTime)
+                    
+                    // 根据当前阶段控制延迟，模拟速度变化
+                    delay(Random.nextLong(10, 20))
                 }
-                // 3. 发送 ACTION_UP 事件，标志着手指抬起
-                val upTime = downTime + duration
-                dispatchTouchEvent(view, MotionEvent.ACTION_UP, endX, endY, downTime, upTime)
-                Log.i(TAG, "模拟滑动事件序列发送完毕.")
+
+                // 3. ACTION_UP (在最终目标点抬起)
+                val finalUpTime = lastEventTime + Random.nextLong(30, 80)
+                dispatchTouchEvent(view, MotionEvent.ACTION_UP, endX, endY, downTime, finalUpTime)
+                
             } catch (e: Throwable) {
-                Log.e(TAG, "派发触摸事件时发生异常", e)
+                Log.e(TAG, "滑动异常", e)
             }
         }
+    }
+
+    /**
+     * 生成非线性的拟人轨迹
+     * 逻辑：加速 -> 快速 -> 减速 -> 超过目标(Overshoot) -> 拨回(Back)
+     */
+    private fun generateHumanLikeTracks(totalDistance: Float): List<Pair<Float, Float>> {
+        val tracks = mutableListOf<Pair<Float, Float>>()
+        var currentX = 0f
+        var v = 0f         // 初速度
+        val a_accel = 1.5f // 加速度系数
+        val a_decel = -2.0f // 减速阶段系数
+        val mid = totalDistance * 0.7f // 前70%进行冲刺
+        
+        // 模拟滑动过程
+        while (currentX < totalDistance) {
+            val a = if (currentX < mid) a_accel else a_decel
+            val t = 0.5f // 时间步长
+            val move = v * t + 0.5f * a * t * t
+            v += a * t
+            if (v < 0.5f && currentX >= mid) v = 0.5f // 保持最起码的移动
+            
+            currentX += move
+            tracks.add(Pair(currentX, 0f))
+            
+            if (currentX > totalDistance) break
+        }
+
+        // 模拟拟人化特征：回摆 (Overshoot & Back)
+        // 手指经常会滑过一点点然后再拨回来
+        val overshoot = Random.nextFloat() * 5f + 2f // 划过 2~7 像素
+        tracks.add(Pair(totalDistance + overshoot, 0f))
+        tracks.add(Pair(totalDistance + (overshoot / 2), 0f))
+        tracks.add(Pair(totalDistance, 0f))
+
+        return tracks
     }
 
     /**
