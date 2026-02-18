@@ -35,12 +35,12 @@ class SliderTFLite(val context: Context) {
         try {
             // 配置 GPU 或 CPU 线程
             val optionsBuilder = Model.Options.Builder()
-            if (CompatibilityList().isDelegateSupportedOnThisDevice) {
-                Log.record(TAG, "GPU支持加速,启用GPU加速")
-                optionsBuilder.setDevice(Model.Device.GPU)
-            } else {
-                optionsBuilder.setNumThreads(4)
-            }
+            //if (CompatibilityList().isDelegateSupportedOnThisDevice) {
+            //    Log.record(TAG, "GPU支持加速,启用GPU加速")
+            //    optionsBuilder.setDevice(Model.Device.GPU)
+            //} else {
+            //    optionsBuilder.setNumThreads(4)
+            //}
 
             // 使用生成的 Slider 类实例化
             sliderModel = Slider.newInstance(context, optionsBuilder.build())

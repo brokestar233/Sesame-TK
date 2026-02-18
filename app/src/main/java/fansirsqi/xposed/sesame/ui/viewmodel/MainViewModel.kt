@@ -215,6 +215,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val ctx = getApplication<Application>()
             AssetUtil.copySoFileToStorage(ctx, AssetUtil.checkerDestFile)
             AssetUtil.copySoFileToStorage(ctx, AssetUtil.dexkitDestFile)
+            AssetUtil.copySoFileToStorage(ctx, AssetUtil.tfliteDestFile)
+            AssetUtil.copySoFileToStorage(ctx, AssetUtil.tfliteGpuDestFile)
         } catch (e: Exception) {
             Log.e(TAG, "Asset copy error", e)
         }

@@ -65,6 +65,8 @@ import fansirsqi.xposed.sesame.task.customTasks.ManualTaskModel
 import fansirsqi.xposed.sesame.util.AssetUtil.checkerDestFile
 import fansirsqi.xposed.sesame.util.AssetUtil.copyStorageSoFileToPrivateDir
 import fansirsqi.xposed.sesame.util.AssetUtil.dexkitDestFile
+import fansirsqi.xposed.sesame.util.AssetUtil.tfliteDestFile
+import fansirsqi.xposed.sesame.util.AssetUtil.tfliteGpuDestFile
 import fansirsqi.xposed.sesame.util.DataStore.init
 import fansirsqi.xposed.sesame.util.Detector
 import fansirsqi.xposed.sesame.util.Detector.loadLibrary
@@ -351,6 +353,8 @@ class ApplicationHook {
     private fun loadLibs() {
         loadNativeLibs(appContext!!, checkerDestFile)
         loadNativeLibs(appContext!!, dexkitDestFile)
+        loadNativeLibs(appContext!!, tfliteDestFile)
+        loadNativeLibs(appContext!!, tfliteGpuDestFile)
     }
 
     // 滑块验证hook注册
