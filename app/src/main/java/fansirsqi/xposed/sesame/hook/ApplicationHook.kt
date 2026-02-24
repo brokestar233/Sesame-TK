@@ -62,6 +62,7 @@ import fansirsqi.xposed.sesame.task.antForest.AntForest
 import fansirsqi.xposed.sesame.task.customTasks.CustomTask
 import fansirsqi.xposed.sesame.task.customTasks.ManualTask
 import fansirsqi.xposed.sesame.task.customTasks.ManualTaskModel
+import fansirsqi.xposed.sesame.util.AssetUtil
 import fansirsqi.xposed.sesame.util.AssetUtil.checkerDestFile
 import fansirsqi.xposed.sesame.util.AssetUtil.copyStorageSoFileToPrivateDir
 import fansirsqi.xposed.sesame.util.AssetUtil.dexkitDestFile
@@ -245,6 +246,8 @@ class ApplicationHook {
 
                         initVersionInfo(packageName)
                         loadLibs()
+
+                        HookUtil.hookAssetManagerForModel(classLoader!!)
                         // 特殊版本处理
                         if (VersionHook.hasVersion() && alipayVersion.compareTo(AlipayVersion("10.7.26.8100")) == 0) {
                             HookUtil.fuckAccounLimit(classLoader!!)
@@ -355,6 +358,18 @@ class ApplicationHook {
         loadNativeLibs(appContext!!, dexkitDestFile)
         loadNativeLibs(appContext!!, tfliteDestFile)
         loadNativeLibs(appContext!!, tfliteGpuDestFile)
+
+        try {
+            AssetUtil.copyStorageModelToPrivateDir(appContext!!, AssetUtil.sliderModelDestFile)
+            if (AssetUtil.modelPrivateFile != null) {
+
+                Log.record(TAG, "Model loaded: ${AssetUtil.modelPrivateFile?.absolutePath}")
+            } else {
+                Log.error(TAG, "Model load failed")
+            }
+        } catch (e: Exception) {
+            Log.printStackTrace(TAG, "载入模型失败", e)
+        }
     }
 
     // 滑块验证hook注册

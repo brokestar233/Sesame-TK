@@ -217,6 +217,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AssetUtil.copySoFileToStorage(ctx, AssetUtil.dexkitDestFile)
             AssetUtil.copySoFileToStorage(ctx, AssetUtil.tfliteDestFile)
             AssetUtil.copySoFileToStorage(ctx, AssetUtil.tfliteGpuDestFile)
+
+            AssetUtil.copyAssetToStorage(ctx, AssetUtil.SLIDER_MODEL, AssetUtil.sliderModelDestFile)
         } catch (e: Exception) {
             Log.e(TAG, "Asset copy error", e)
         }
